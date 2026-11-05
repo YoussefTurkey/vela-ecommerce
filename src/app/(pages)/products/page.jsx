@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -12,11 +12,38 @@ import FilterSidebar from "../../components/product/FilterSidebar";
 import ProductCard from "../../components/product/ProductCard";
 import ProductCardSkeleton from "../../components/product/ProductCardSkeleton";
 import Pagination from "../../components/ui/Pagination";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PAGE_SIZE, SORT_OPTIONS } from "../../data/productListingData";
 
 export default function ProductsListing() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  return (
+    <Suspense
+      fallback={
+        <div className="container-app py-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <ProductsListingContent />
+    </Suspense>
+  );
+}
+
+function ProductsListingContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const setSearchParams = useCallback(
+    (params) => {
+      const qs = new URLSearchParams(params).toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
   const urlQuery = searchParams?.get("q") || "";
   const urlCategory = searchParams?.get("category") || "all";
 
@@ -31,15 +58,30 @@ export default function ProductsListing() {
   const [view, setView] = useState("grid");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  useEffect(() => {
+  // Sync local state with the URL (adjust state during render, not in an effect)
+  const urlKey = `${urlQuery}|${urlCategory}`;
+  const [prevUrlKey, setPrevUrlKey] = useState(urlKey);
+  if (prevUrlKey !== urlKey) {
+    setPrevUrlKey(urlKey);
     setSearch(urlQuery);
     setCategory(urlCategory);
-  }, [urlQuery, urlCategory]);
+  }
 
-  useEffect(
-    () => setPage(1),
-    [search, category, priceRange, minRating, brand, inStockOnly, sort],
-  );
+  // Reset to the first page whenever a filter changes
+  const filterKey = [
+    search,
+    category,
+    priceRange,
+    minRating,
+    brand,
+    inStockOnly,
+    sort,
+  ].join("|");
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (prevFilterKey !== filterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
 
   const { data: categories } = useCategories();
   const { data, isLoading, isFetching } = useProducts({
@@ -48,7 +90,7 @@ export default function ProductsListing() {
     category: category !== "all" ? category : undefined,
   });
 
-  const allProducts = data?.products || [];
+  const allProducts = useMemo(() => data?.products || [], [data]);
 
   const brands = useMemo(
     () =>
